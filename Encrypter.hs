@@ -7,7 +7,6 @@ import Data.Finite
 import Data.Proxy
 import qualified Data.Vector as V
 import GHC.TypeNats
-import Data.Type.Equality
 
 -- Declare fixed size data type and operations
 
@@ -77,7 +76,7 @@ convolute = go 0
 
 -- Perform multipilcation on GF[2^8]/(x^8+x^4+x^3+x+1)
 gfMult :: Word8 -> Word8 -> Word8
-gfMult x y = (fromIntegral (gfRemainder (convolute ((fromIntegral x) :: Word16) ((fromIntegral x) :: Word16)) 0x11b)) :: Word8
+gfMult x y = (fromIntegral (gfRemainder (convolute ((fromIntegral x) :: Word16) ((fromIntegral y) :: Word16)) 0x11b)) :: Word8
 
 deconvolute :: Word16 -> Word16 -> (Word16, Word16)
 deconvolute x y = go x 0 y
@@ -172,25 +171,41 @@ mixColumns state = go 0 state $ replicateVec 0 :: Word128
 
 mixColArray :: Array (Int, Int) Word8
 mixColArray = array ((0,0),(3,3)) $ [if i==j then ((i,j), 2)
-                                        else if (i == (j+1)) || (i== 3 && j==0) then ((i,j), 3)
+                                        else if ((i+1) == j) || (i== 3 && j==0) then ((i,j), 3)
                                             else ((i,j), 1) | i <- range (0,3), j <- range (0,3)]
+
+decryptBlock :: Word128 -> Word128 -> Word128
+decryptBlock key state = addRoundKey 0 $ go 9 $ invSubBytes $ invShiftRows $ addRoundKey 10 state
+    where keySch = array (0,10) $ zip [0..10] $ keySchedule key
+          invSubBytes state = mapBytes_128 (invSboxTable !) state
+          invShiftRows state = zipVecWith rotateR state $ (mkVec (V.enumFromStepN 0 8 4)) :: Word128
+          addRoundKey i state = zipVecWith xor (keySch ! i) state
+          go i state | i > 0 = go (i-1) $ invSubBytes $ invShiftRows $ invMixColumns $ addRoundKey i state
+                     | otherwise = state                                    
+
+invMixColumns :: Word128 -> Word128       
+invMixColumns state = go 0 state $ replicateVec 0 :: Word128
+    where 
+        go i state accState
+            | i < 4 = go (i+1) state $ zipVecWith xor accState $ (mkVec putBytes) :: Word128
+            | otherwise = accState
+            where
+                extractedBytes = V.map (\x -> (fromIntegral (shiftR x (8*i))) :: Word8) $ getVector state
+                transformedBytes = bitMVMult invMixColArray extractedBytes
+                putBytes = V.map (\x -> (shiftL ((fromIntegral x) :: Word32) (8*i))) transformedBytes
+
+invMixColArray :: Array (Int, Int) Word8
+invMixColArray = array ((0,0),(3,3)) $ [if i==j then ((i,j), 14)
+                                         else if ((i+1) == j) || (i== 3 && j==0) then ((i,j), 11)  
+                                           else if (i == (j+1)) || (i == 0 && j==3) then ((i,j), 9)
+                                            else ((i,j), 13) | i <- range (0,3), j <- range (0,3)]
 
 -- Bitwise matrix-vector multiplication as used in AES mixColums step that uses xor as addition
 -- and multipilcation on GF[2^8]/(x^8+x^4+x^3+x+1).
 bitMVMult :: Array (Int, Int) Word8 -> V.Vector Word8 -> V.Vector Word8
 bitMVMult a x
-    -- Ensure correct dimension for multiplication
-    | (uj-lj) /= len = error "Incorrect dimensions for matrix-vector multiplication."
+    -- Ensure correct dimensions for multiplication
+    | (uj-lj+1) /= len = error "Incorrect dimensions for matrix-vector multiplication."
     | otherwise = V.fromList [foldl xor 0 [gfMult (a!(i,j)) (x V.! (j-lj)) | j <- range (lj,uj)] | i <- range (li,ui)]
       where ((li,lj),(ui,uj)) = bounds a
             len = length x
-
-
-{- 
--- Construct Word128 from list of Word32
-construct128 :: [Word32] -> Word128
-construct128 = go 0
-    where
-        go _ [] = 0
-        go i (x:xs) = (shiftR ((fromIntegral x) :: Word128) (i*32)) `xor` (go (i+1) xs)
--}
