@@ -123,8 +123,8 @@ mapBytes_32 f x = go f x 0 0
     where
         go :: (Word8 -> Word8) -> Word32 -> Int -> Word32 -> Word32
         go f x i acc | i == 4 = acc
-                     | otherwise = go f x (i+1)  $ xor acc $ shiftR ((fromIntegral 
-                        (f ((fromIntegral (shiftL x (8*i))) :: Word8))) :: Word32) (8*i)
+                     | otherwise = go f x (i+1)  $ xor acc $ shiftL ((fromIntegral 
+                        (f ((fromIntegral (shiftR x (8*i))) :: Word8))) :: Word32) (8*i)
 
 -- Map function on a 8-bit words to each byte of the 128-bit argument
 mapBytes_128 :: (Word8 -> Word8) -> Word128 -> Word128
@@ -140,8 +140,8 @@ keySchedule :: Word128 -> [Word128]
 keySchedule key = go 0 key
     where
         go :: Int -> Word128 -> [Word128]
-        go n prev | n < 10 = go (n+1) curr
-                  | otherwise = []
+        go n prev | n < 10 = prev : go (n+1) curr
+                  | otherwise = [prev]
                     where curr = (mkVec $ V.fromList $ buildKeyWords 0 n prev $ indexVec prev 3) :: Word128
         buildKeyWords i keyIndex prevKey prevWord | i == 4 = []
                                                   | otherwise = currWord : (buildKeyWords (i+1) keyIndex prevKey currWord)
