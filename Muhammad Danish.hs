@@ -2,7 +2,7 @@
 
 import Network.Google (runGoogle)
 import Network.Google.Search.Custom (search, CustomSearchCseId(..), CustomSearchApiKey(..), Search(..), Item(..))
-import Data.Text (unpack)
+import Data.Text (pack, unpack, isInfixOf)
 import System.Random
 import Data.List
 import Data.Char
@@ -10,14 +10,10 @@ import Data.Char
 -- Function to perform a Google search and return the top 5 URLs
 googleSearch :: String -> IO [String]
 googleSearch query = do
-  let cseId = CustomSearchCseId "custom-search-engine-id"
-      apiKey = CustomSearchApiKey "api-key"
+  let cseId = CustomSearchCseId (pack "custom-search-engine-id")
+      apiKey = CustomSearchApiKey (pack "api-key")
   result <- runGoogle $ search cseId apiKey query
   return $ take 5 $ map (unpack . itemLink . searchItem) $ searchItems result
-
--- Replace "custom-search-engine-id" and "api-key" with your actual values.
--- You can obtain them by creating a custom search engine on the Google Custom Search Console at https://cse.google.com/cse/
-
 
 -- Function to generate a random password
 generateRandomPassword :: Int -> Bool -> Bool -> IO String
@@ -28,7 +24,7 @@ generateRandomPassword length useSymbols useNumbers = do
     generateAllChars = do
         let chars = ['a'..'z'] ++ ['A'..'Z'] ++ (if useSymbols then "!@#$%^&*()_+-=[]{}|;':,.<>?/" else "")
                     ++ (if useNumbers then "0123456789" else "")
-        return chars
+        return $ chars
 
     shuffle [] = []
     shuffle xs = do
@@ -43,14 +39,35 @@ includeKeyword keyword password = do
     let (before, after) = splitAt index password
     return $ before ++ keyword ++ after
 
-main :: IO ()
-main = do
-    let passwordLength = 8
-    let includeSymbols = True
-    let includeNumbers = True
-    let generatedPassword = generateRandomPassword passwordLength includeSymbols includeNumbers
-    putStrLn $ "Generated Password: " ++ generatedPassword
+-- Boyer-Moore search algorithm
+boyerMooreSearch :: Eq a => [a] -> [a] -> [Int]
+boyerMooreSearch needle haystack = search 0 []
+  where
+    m = length needle
+    n = length haystack
 
-    let keyword = "secure"
-    let passwordWithKeyword = includeKeyword keyword generatedPassword
-    putStrLn $ "Password with Keyword: " ++ passwordWithKeyword
+    rightmost = foldl (\m (i, c) -> insertWith (\_ old -> old) c i m) [] (zip [0..] needle)
+    go i j
+      | j == m = reverse [i..i + m - 1]
+      | i >= n = []
+      | otherwise =
+          let k = case lookup (haystack !! (i + j)) rightmost of
+                    Just x -> x
+                    Nothing -> m
+          in if k == m
+               then go (i + j + 1) 0
+               else go i (max 1 (j - k))
+
+    search i acc
+      | i >= n = acc
+      | otherwise =
+          let indices = go i 0
+          in search (i + 1) (if null indices then acc else indices : acc)
+
+-- Search function for passwords, websites, usernames, and links
+searchKeywords :: String -> String -> String -> String -> [Int]
+searchKeywords password website username link =
+  concatMap (boyerMooreSearch password) ++
+  concatMap (boyerMooreSearch website) ++
+  concatMap (boyerMooreSearch username) ++
+  concatMap (boyerMooreSearch link)
