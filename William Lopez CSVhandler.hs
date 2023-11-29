@@ -23,14 +23,15 @@ instance Show PassInfo where
 
 main :: IO ()
 main = do
-    putStr "Haskel Password Manager:"
+    putStr "Haskel Password Manager:\n"
     tsv <- readFile "resources\\info.txt"
     let importedInfoList = createPassInfoList (stringToList tsv)
     handleLoop importedInfoList
 
 handleLoop :: [PassInfo] -> IO ()
 handleLoop masterList = do
-    putStr "\nEnter a Command\n"
+    putStr ("\nThere are " ++ (show (length masterList)) ++ " passwords saved.\n")
+    putStr "Enter a Command\n"
     putStr "All|Add|Delete|Get|Import|Export|Save|Quit\n"
     nextCommand <- getLine
     if (nextCommand == "Quit")
