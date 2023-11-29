@@ -18,11 +18,12 @@ data PassInfo = PassInfo
 
 instance Show PassInfo where
     show (PassInfo username password website url) =
-        "\nWebsite: " ++ website ++ "\nURL: " ++ url ++
-        "\n   Login Info:\n   " ++ (show username) ++ "\n   Password:\n   " ++ password ++ "\n"
+        "\n\nWebsite: " ++ website ++ "\nURL: " ++ url ++
+        "\nLogin Info: " ++ (show username) ++ "\nPassword: " ++ password ++ "\nPassword Strength = " ++ show (getPasswordStrength password 0) ++ "\n"
 
 main :: IO ()
 main = do
+    putStr "Haskel Password Manager:"
     tsv <- readFile "resources\\info.txt"
     let importedInfoList = createPassInfoList (stringToList tsv)
     handleLoop importedInfoList
@@ -68,7 +69,7 @@ handleLoop masterList = do
                 newInfo <- readFile filePath
                 handleLoop (dropDuplicateInfo (masterList ++ (createPassInfoList (stringToList newInfo))))
             "Export" -> do
-                putStr("Enter a file path.\n")
+                putStr("Please enter a file path.\n")
                 filePath <- getLine
                 exportPasswordInfo filePath masterList
                 handleLoop masterList
@@ -82,20 +83,21 @@ handleLoop masterList = do
 -- Gets a list of UsernameData from the user
 getUsernamesFromUser :: [UsernameData] -> IO [UsernameData]
 getUsernamesFromUser acc = do
-    putStr("Do you login with a (u)sername, (e)mail, (p)honenumber, or are you (d)one.\n")
+    putStr("Do you login with a 'Username', 'Email', 'Phonenumber'.\n")
+    putStr("This will repeat until 'Done' entered.\n")
     newUsernameType <- getLine
     case newUsernameType of
-        "d" -> return acc
-        "u" -> do
-            putStr("Enter the username, email, or phonenumber.\n")
+        "Done" -> return acc
+        "Username" -> do
+            putStr("Enter the username.\n")
             newUsername <- getLine
             getUsernamesFromUser (acc ++ [(Username newUsername)])
-        "e" -> do
-            putStr("Enter the username, email, or phonenumber.\n")
+        "Email" -> do
+            putStr("Enter the email.\n")
             newUsername <- getLine
             getUsernamesFromUser (acc ++ [(Email newUsername)])
-        "p" -> do
-            putStr("Enter the username, email, or phonenumber.\n")
+        "Phonenumber" -> do
+            putStr("Enter the phonenumber.\n")
             newUsername <- getLine
             getUsernamesFromUser (acc ++ [(PhoneNumber newUsername)])
         dfault -> getUsernamesFromUser acc
