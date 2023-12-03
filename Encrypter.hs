@@ -1,3 +1,16 @@
+module Encrypter (
+    Vec,
+    Word128,
+    mkVec,
+    mapM_Vec,
+    zipVec,
+    zipVecWith,
+    indexVec,
+    replicateVec,
+    encryptBlock,
+    decryptBlock
+) where
+
 {-# LANGUAGE DataKinds, ScopedTypeVariables, GADTs #-}
 
 import Data.Bits
@@ -26,6 +39,9 @@ mapVec f v = UnsafeMkVec $ V.map f (getVector v)
 
 instance Functor (Vec n) where
     fmap = mapVec
+
+mapM_Vec :: Monad m => (a -> m b) -> Vec n a -> m ()
+mapM_Vec f v = V.mapM_ f (getVector v)
 
 zipVec :: Vec n a -> Vec n b -> Vec n (a, b)
 zipVec (UnsafeMkVec xs) (UnsafeMkVec ys) = UnsafeMkVec (V.zip xs ys)
@@ -117,7 +133,7 @@ invSboxTable = array (0,255) $ zip is $ map invSbox is
     where is :: [Word8]
           is = [0..255]
 
--- Map function on a 8-bit words to each byte of the 32-bit argument
+-- Map function on 8-bit words to each byte of the 32-bit argument
 mapBytes_32 :: (Word8 -> Word8) -> Word32 -> Word32
 mapBytes_32 f x = go f x 0 0
     where
@@ -126,7 +142,7 @@ mapBytes_32 f x = go f x 0 0
                      | otherwise = go f x (i+1)  $ xor acc $ shiftL ((fromIntegral 
                         (f ((fromIntegral (shiftR x (8*i))) :: Word8))) :: Word32) (8*i)
 
--- Map function on a 8-bit words to each byte of the 128-bit argument
+-- Map function on 8-bit words to each byte of the 128-bit argument
 mapBytes_128 :: (Word8 -> Word8) -> Word128 -> Word128
 mapBytes_128 bf x = fmap (mapBytes_32 bf) x
 
@@ -200,7 +216,7 @@ invMixColArray = array ((0,0),(3,3)) $ [if i==j then ((i,j), 14)
                                            else if (i == (j+1)) || (i == 0 && j==3) then ((i,j), 9)
                                             else ((i,j), 13) | i <- range (0,3), j <- range (0,3)]
 
--- Bitwise matrix-vector multiplication as used in AES mixColums step that uses xor as addition
+-- Bitwise matrix-vector multiplication as used in the AES mixColums step. Uses xor as addition
 -- and multipilcation on GF[2^8]/(x^8+x^4+x^3+x+1).
 bitMVMult :: Array (Int, Int) Word8 -> V.Vector Word8 -> V.Vector Word8
 bitMVMult a x
