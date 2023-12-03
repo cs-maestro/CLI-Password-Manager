@@ -19,14 +19,29 @@ data PassInfo = PassInfo
 instance Show PassInfo where
     show (PassInfo username password website url) =
         "\n\nWebsite: " ++ website ++ "\nURL: " ++ url ++
-        "\nLogin Info: " ++ (show username) ++ "\nPassword: " ++ password ++ "\nPassword Strength = " ++ show (getPasswordStrength password 0) ++ "\n"
+        "\nLogin Info: " ++ (show username) ++ "\nPassword: " ++ password ++ "\nPassword Strength = " ++ (getPasswordStrength password) ++ "\n"
 
 main :: IO ()
 main = do
     putStr "Haskel Password Manager:\n"
-    tsv <- readFile "resources\\info.txt"
-    let importedInfoList = createPassInfoList (stringToList tsv)
-    handleLoop importedInfoList
+    masterPassword <- readFile "resources\\userinf.txt"
+    if (masterPassword == "")
+        then do 
+            putStr "Set a master password.\n"
+            newMasterPassword <- getLine
+            writeFile "resources\\userinf.txt" newMasterPassword
+            tsv <- readFile "resources\\info.txt"
+            let importedInfoList = createPassInfoList (stringToList tsv)
+            handleLoop importedInfoList
+        else do
+            putStr "Please enter the master password.\n"
+            userMasterPassword <- getLine
+            if (userMasterPassword == masterPassword)
+                then do
+                    tsv <- readFile "resources\\info.txt"
+                    let importedInfoList = createPassInfoList (stringToList tsv)
+                    handleLoop importedInfoList
+                else putStr "Invalid master password.\n"
 
 handleLoop :: [PassInfo] -> IO ()
 handleLoop masterList = do
@@ -174,16 +189,28 @@ dropDuplicateInfo (x:xs) =
         then dropDuplicateInfo xs
         else x : dropDuplicateInfo xs
 
+
+
 -- Converts a string to an integer value.
 -- takes the string and 0 as an input.
-getPasswordStrength :: String -> Int -> Int
-getPasswordStrength [] acc = acc
-getPasswordStrength (x:xs) acc = 
-    if (elem x "!@#$%^&*()_-~`+=<>?:{}|,./\\;\'[]\"")
-        then getPasswordStrength xs (acc + 12)
-        else if (elem x "1234567890")
-            then getPasswordStrength xs (acc + 6)
-            else getPasswordStrength xs (acc + 3)
+getPasswordStrength :: String -> String
+getPasswordStrength pass = 
+    if ((passwordToNumber pass 0) > 50)
+        then "strong"
+        else if ((passwordToNumber pass 0) > 25)
+            then "medium"
+            else if ((passwordToNumber pass 0) > 10)
+                then "weak"
+                else "very weak"
+    where
+        passwordToNumber :: String -> Int -> Int
+        passwordToNumber [] acc = acc
+        passwordToNumber (x:xs) acc = 
+            if (elem x "!@#$%^&*()_-~`+=<>?:{}|,./\\;\'[]\"")
+                then passwordToNumber xs (acc + 12)
+                else if (elem x "1234567890")
+                    then passwordToNumber xs (acc + 6)
+                    else passwordToNumber xs (acc + 3)
 
 -- Exports a list of PassInfo to a file.
 -- takes a file path and list of PassInfo.
