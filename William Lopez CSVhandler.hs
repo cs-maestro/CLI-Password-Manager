@@ -1,4 +1,5 @@
 module Main where
+import System.Directory
 import Data.List.Split
 
 data UsernameData = Username String | Email String | PhoneNumber String deriving (Eq)
@@ -24,15 +25,16 @@ instance Show PassInfo where
 main :: IO ()
 main = do
     putStr "Haskel Password Manager:\n"
-    tsv <- readFile "resources\\info.txt"
-    let stl = stringToList tsv
-    if (stl == [])
+    dfe <- doesFileExist "resources\\info.txt"
+    if (dfe == False)
         then do 
             putStr "Set a master password.\n"
             newMasterPassword <- getLine
             writeFile "resources\\info.txt" (newMasterPassword ++ "\n")
             handleLoop [] newMasterPassword
         else do
+            tsv <- readFile "resources\\info.txt"
+            let stl = stringToList tsv
             putStr "Please enter the master password.\n"
             userMasterPassword <- getLine
             if (userMasterPassword == (head (head stl)))
