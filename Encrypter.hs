@@ -8,7 +8,8 @@ module Encrypter (
     indexVec,
     replicateVec,
     encryptBlock,
-    decryptBlock
+    decryptBlock,
+    keySchedule
 ) where
 
 {-# LANGUAGE DataKinds, ScopedTypeVariables, GADTs #-}
@@ -165,10 +166,9 @@ keySchedule key = go 0 key
                   currWord | i == 0 = prevKeyWord `xor` (aes_rc V.! keyIndex) `xor` (mapBytes_32 (sboxTable !) (rotateL prevWord 8))
                            | otherwise = prevKeyWord `xor` prevWord
 
-encryptBlock :: Word128 -> Word128 -> Word128
-encryptBlock key state = addRoundKey 10 $ shiftRows $ subBytes $ go 1 $ addRoundKey 0 state
-    where keySch = array (0,10) $ zip [0..10] $ keySchedule key
-          subBytes state = mapBytes_128 (sboxTable !) state
+encryptBlock :: Array Int Word128 -> Word128 -> Word128
+encryptBlock keySch state = addRoundKey 10 $ shiftRows $ subBytes $ go 1 $ addRoundKey 0 state
+    where subBytes state = mapBytes_128 (sboxTable !) state
           shiftRows state = zipVecWith rotateL state $ (mkVec (V.enumFromStepN 0 8 4)) :: Word128
           addRoundKey i state = zipVecWith xor (keySch ! i) state
           go i state | i < 10 = go (i+1) $ addRoundKey i $ mixColumns $ shiftRows $ subBytes state
@@ -190,10 +190,9 @@ mixColArray = array ((0,0),(3,3)) $ [if i==j then ((i,j), 2)
                                         else if ((i+1) == j) || (i== 3 && j==0) then ((i,j), 3)
                                             else ((i,j), 1) | i <- range (0,3), j <- range (0,3)]
 
-decryptBlock :: Word128 -> Word128 -> Word128
-decryptBlock key state = addRoundKey 0 $ go 9 $ invSubBytes $ invShiftRows $ addRoundKey 10 state
-    where keySch = array (0,10) $ zip [0..10] $ keySchedule key
-          invSubBytes state = mapBytes_128 (invSboxTable !) state
+decryptBlock :: Array Int Word128 -> Word128 -> Word128
+decryptBlock keySch state = addRoundKey 0 $ go 9 $ invSubBytes $ invShiftRows $ addRoundKey 10 state
+    where invSubBytes state = mapBytes_128 (invSboxTable !) state
           invShiftRows state = zipVecWith rotateR state $ (mkVec (V.enumFromStepN 0 8 4)) :: Word128
           addRoundKey i state = zipVecWith xor (keySch ! i) state
           go i state | i > 0 = go (i-1) $ invSubBytes $ invShiftRows $ invMixColumns $ addRoundKey i state

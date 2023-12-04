@@ -13,58 +13,63 @@ import Data.Proxy
 import Data.Word
 import Encrypter
 import GHC.ByteOrder
+import Data.Array
+
+-- #TODO: Reuse keyschedule
 
 -- Takes an ecrypted file specified by a filepath and exports a decrypted file
 decryptFile :: FilePath -> FilePath -> Word128 -> IO ()
 decryptFile pathIn pathOut key = do
     hIn <- openFile pathIn ReadMode
     hOut <- openFile pathOut WriteMode
-    go hIn hOut key
+    go hIn hOut
     hClose hIn
     hClose hOut
     where
-      go hIn hOut key = do
+      keySch = array (0,10) $ zip [0..10] $ keySchedule key
+      go hIn hOut = do
         empty <- hIsEOF hIn
         if empty
             then pure ()
             else do
-                decryptProcessBlock hIn hOut key
-                go hIn hOut key
+                decryptProcessBlock hIn hOut keySch
+                go hIn hOut
 
--- Reads a word128 chunk from file and 
-decryptProcessBlock :: Handle -> Handle -> Word128 -> IO ()
-decryptProcessBlock hIn hOut key = do
+-- Reads a word128 block from file and exports decrypted block to a given file.
+decryptProcessBlock :: Handle -> Handle -> Array Int Word128 -> IO ()
+decryptProcessBlock hIn hOut keySch = do
     -- Read 16 byte block 
     bs <- B.hGet hIn 16
     let block = mkVec (runGet (V.replicateM 4 safeGetWord32host) bs) :: Word128
-    let decryptedBlock = decryptBlock key block
+    let decryptedBlock = decryptBlock keySch block
     let bsOut = runPut $ mapM_Vec safePutWord32host decryptedBlock
     B.hPut hOut bsOut
 
--- Takes an ecrypted file specified by a filepath and exports a decrypted file
+-- Takes an ecrypted file specified by a filepath and exports a encrypted file
 encryptFile :: FilePath -> FilePath -> Word128 -> IO ()
 encryptFile pathIn pathOut key = do
     hIn <- openFile pathIn ReadMode
     hOut <- openFile pathOut WriteMode
-    go hIn hOut key
+    go hIn hOut
     hClose hIn
     hClose hOut
     where
-      go hIn hOut key = do
+      keySch = array (0,10) $ zip [0..10] $ keySchedule key
+      go hIn hOut = do
         empty <- hIsEOF hIn
         if empty
             then pure ()
             else do
-                encryptProcessBlock hIn hOut key
-                go hIn hOut key
+                encryptProcessBlock hIn hOut keySch
+                go hIn hOut
 
--- Reads a word128 chunk from file and 
-encryptProcessBlock :: Handle -> Handle -> Word128 -> IO ()
-encryptProcessBlock hIn hOut key = do
+-- Reads a word128 block from file and exports encrypted block to a given file.
+encryptProcessBlock :: Handle -> Handle -> Array Int Word128 -> IO ()
+encryptProcessBlock hIn hOut keySch = do
     -- Read 16 byte block 
     bs <- B.hGet hIn 16
     let block = mkVec (runGet (V.replicateM 4 safeGetWord32host) bs) :: Word128
-    let decryptedBlock = encryptBlock key block
+    let decryptedBlock = encryptBlock keySch block
     let bsOut = runPut $ mapM_Vec putWord32host decryptedBlock
     B.hPut hOut bsOut
 
@@ -143,6 +148,8 @@ safePutWord32be w = go 0 w
                     putWord8 myWord8
                     go (i+1) w
 
+-- Put bytes from Word32 using host's endian format.
+-- If a null byte is encountered, then stops putting bytes.
 safePutWord32host :: Word32 -> Put
 safePutWord32host w = case targetByteOrder of
     BigEndian -> safePutWord32be w
