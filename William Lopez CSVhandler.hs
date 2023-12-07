@@ -1,6 +1,13 @@
 module Main where
 import System.Directory
 import Data.List.Split
+import EncryptionIO
+import Encrypter
+import qualified Data.Vector as V
+import qualified Data.ByteString.Lazy as B
+import qualified Data.ByteString as BNL
+import Data.Binary.Get
+import Data.Binary.Put
 
 data UsernameData = Username String | Email String | PhoneNumber String deriving (Eq)
 
@@ -25,27 +32,47 @@ instance Show PassInfo where
 main :: IO ()
 main = do
     putStr "Haskel Password Manager:\n"
-    dfe <- doesFileExist "resources\\info.txt"
+    dfe <- doesFileExist "resources\\encInfo.bin"
     if (dfe == False)
         then do 
             putStr "Set a master password.\n"
             newMasterPassword <- getLine
-            writeFile "resources\\info.txt" (newMasterPassword ++ "\n")
-            handleLoop [] newMasterPassword
+            salt <- generateSalt
+            print salt
+            passDigest <- generatePassDigest newMasterPassword salt
+            createDirectoryIfMissing False "resources"
+            writeBin salt (digestPassHash passDigest)
+            handleLoop []
+            
+            let key = mkVec (runGet (V.replicateM 4 getWord32host) (BNL.fromStrict (digestKey passDigest))) :: Word128
+            encryptFile "resources\\info.txt" "resources\\encInfo.bin" key
+            removeFile "resources\\info.txt"
         else do
+            binData <- readBin
+            key <- passwordLoop binData
+            decryptFile "resources\\encInfo.bin" "resources\\info.txt" key
             tsv <- readFile "resources\\info.txt"
             let stl = stringToList tsv
+            let importedInfoList = createPassInfoList stl
+            handleLoop importedInfoList
+            
+            encryptFile "resources\\info.txt" "resources\\encInfo.bin" key
+            removeFile "resources\\info.txt"
+    where
+        passwordLoop :: BinData -> IO Word128
+        passwordLoop binData = do
             putStr "Please enter the master password.\n"
             userMasterPassword <- getLine
-            if (userMasterPassword == (head (head stl)))
-                then do
-                    tsv <- readFile "resources\\info.txt"
-                    let importedInfoList = createPassInfoList (tail stl)
-                    handleLoop importedInfoList userMasterPassword
-                else putStr "Invalid master password.\n"
+            passDigest <- generatePassDigest userMasterPassword $ binSalt binData
+            if (binPassHash binData) == (digestPassHash passDigest)
+                then pure (mkVec (runGet (V.replicateM 4 getWord32host) (BNL.fromStrict (digestKey passDigest))) :: Word128)
+                else do
+                        putStr "Incorrect password.\n"
+                        passwordLoop binData
 
-handleLoop :: [PassInfo] -> String -> IO ()
-handleLoop masterList masterPass = do
+
+handleLoop :: [PassInfo] -> IO ()
+handleLoop masterList = do
     putStr ("\nThere are " ++ (show (length masterList)) ++ " passwords saved.\n")
     putStr "Enter a Command\n"
     putStr "All|Add|Delete|Get|Import|Export|Save|Quit\n"
@@ -55,7 +82,7 @@ handleLoop masterList masterPass = do
         else case nextCommand of
             "All" -> do
                 putStr (show masterList)
-                handleLoop masterList masterPass
+                handleLoop masterList
             "Add" -> do 
                 newusernames <- (getUsernamesFromUser [])
                 putStr("Enter a website.\n")
@@ -67,35 +94,35 @@ handleLoop masterList masterPass = do
                 if (duplicateInfo (masterList ++ [(PassInfo newusernames newPassword newWebsite newURL)]))
                     then do 
                         putStr("This Information already exists.\n")
-                        handleLoop masterList masterPass
-                    else handleLoop (masterList ++ [(PassInfo newusernames newPassword newWebsite newURL)]) masterPass
+                        handleLoop masterList
+                    else handleLoop (masterList ++ [(PassInfo newusernames newPassword newWebsite newURL)])
             "Delete" -> do
                 putStr("Enter a website.\n")
                 websiteToDelete <- getLine
                 putStr("Enter a password.\n")
                 passwordToDelete <- getLine
-                handleLoop (deleteFromInfoList websiteToDelete passwordToDelete masterList) masterPass
+                handleLoop (deleteFromInfoList websiteToDelete passwordToDelete masterList)
             "Get" -> do 
                 putStr ("Enter a username.\n")
                 line <- getLine
                 putStr (show (fetchFromUsername line masterList))
-                handleLoop masterList masterPass
+                handleLoop masterList
             "Import" -> do
                 putStr("Please enter a file path.\n")
                 filePath <- getLine
                 newInfo <- readFile filePath
-                handleLoop (dropDuplicateInfo (masterList ++ (createPassInfoList (stringToList newInfo)))) masterPass
+                handleLoop (dropDuplicateInfo (masterList ++ (createPassInfoList (stringToList newInfo))))
             "Export" -> do
                 putStr("Please enter a file path.\n")
                 filePath <- getLine
-                exportPasswordInfo filePath masterPass masterList
-                handleLoop masterList masterPass
+                exportPasswordInfo filePath masterList
+                handleLoop masterList
             "Save" -> do
-                exportPasswordInfo "resources\\info.txt" masterPass masterList
-                handleLoop masterList masterPass
+                exportPasswordInfo "resources\\info.txt" masterList
+                handleLoop masterList
             dfault -> do
                 putStr("Command not recognized.\n")
-                handleLoop masterList masterPass
+                handleLoop masterList
 
 -- Gets a list of UsernameData from the user
 getUsernamesFromUser :: [UsernameData] -> IO [UsernameData]
@@ -215,8 +242,8 @@ getPasswordStrength pass =
 
 -- Exports a list of PassInfo to a file.
 -- takes a file path and list of PassInfo.
-exportPasswordInfo :: String -> String -> [PassInfo] -> IO()
-exportPasswordInfo path masterPass xs = writeFile path (masterPass ++ "\n" ++ (listToString xs ""))
+exportPasswordInfo :: String -> [PassInfo] -> IO()
+exportPasswordInfo path xs = writeFile path (listToString xs "")
 
 -- Converts a list of PassInfo to an exportable string.
 -- takes a list of PassInfo and an empty list as input.

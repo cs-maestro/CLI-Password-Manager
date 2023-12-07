@@ -1,11 +1,14 @@
 {-# LANGUAGE DataKinds, ScopedTypeVariables, GADTs #-}
 
+module EncryptionIO where
+
 import Data.Bits
 import Data.Binary.Get
 import Data.Binary.Put
 import Control.Monad
 import qualified Data.Vector as V
 import qualified Data.ByteString.Lazy as B
+import qualified Data.ByteString as BNL
 import System.IO
 import GHC.TypeNats
 import Data.Finite
@@ -14,8 +17,19 @@ import Data.Word
 import Encrypter
 import GHC.ByteOrder
 import Data.Array
+import Data.ByteString.UTF8 as BU
+import Crypto.Argon2
+import System.Random
 
--- #TODO: Reuse keyschedule
+data PassDigest = PassDigest {
+    digestPassHash :: BNL.ByteString,
+    digestKey :: BNL.ByteString
+} deriving Show
+
+data BinData = BinData {
+    binSalt :: BNL.ByteString,
+    binPassHash :: BNL.ByteString
+} deriving Show
 
 -- Takes an ecrypted file specified by a filepath and exports a decrypted file
 decryptFile :: FilePath -> FilePath -> Word128 -> IO ()
@@ -154,3 +168,47 @@ safePutWord32host :: Word32 -> Put
 safePutWord32host w = case targetByteOrder of
     BigEndian -> safePutWord32be w
     otherwise -> safePutWord32le w
+
+-- Generates encryption key and password verification hash from password string 
+-- using the Argon2 hashing algorithm.
+generatePassDigest :: String -> BNL.ByteString -> IO PassDigest
+generatePassDigest password salt = do
+        let hashed = hash myHashOptions (BU.fromString password) $ salt
+        case hashed of
+            (Left _) -> error "There was a problem with hashing password."
+            (Right hashOut) -> let hk = BNL.splitAt 16 hashOut
+                                in pure $ PassDigest {digestPassHash = snd hk, 
+                                                      digestKey = fst hk}
+    where myHashOptions = HashOptions {hashVariant = Argon2id, 
+                                        hashIterations = 10, 
+                                        hashMemory = 250000, 
+                                        hashParallelism = 16, 
+                                        hashVersion = Argon2Version13, 
+                                        hashLength = 48}
+
+-- Generate 256-bit salt
+generateSalt :: IO BNL.ByteString
+generateSalt = do
+    pureGen <- newStdGen
+    pure $ fst $ genByteString 16 pureGen
+
+-- Write binary bin file containing salt and password hash
+writeBin :: BNL.ByteString -> BNL.ByteString -> IO ()
+writeBin salt passHash = do
+    hOut <- openFile "resources\\data.bin" WriteMode
+    BNL.hPut hOut salt
+    BNL.hPut hOut passHash
+    hClose hOut
+
+-- Read salt and password hash from data.bin file
+readBin :: IO BinData
+readBin = do
+    hIn <- openFile "resources\\data.bin" ReadMode
+    salt <- BNL.hGet hIn 16
+    passHash <- BNL.hGet hIn 32
+    hClose hIn
+    pure $ BinData {binPassHash = passHash, binSalt = salt}
+
+
+
+

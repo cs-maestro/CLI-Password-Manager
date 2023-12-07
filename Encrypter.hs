@@ -1,3 +1,5 @@
+{-# LANGUAGE DataKinds, ScopedTypeVariables, GADTs #-}
+
 module Encrypter (
     Vec,
     Word128,
@@ -11,8 +13,6 @@ module Encrypter (
     decryptBlock,
     keySchedule
 ) where
-
-{-# LANGUAGE DataKinds, ScopedTypeVariables, GADTs #-}
 
 import Data.Bits
 import Data.Word
