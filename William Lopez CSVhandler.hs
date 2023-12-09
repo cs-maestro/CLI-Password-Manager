@@ -35,10 +35,8 @@ main = do
     dfe <- doesFileExist "resources\\encInfo.bin"
     if (dfe == False)
         then do 
-            putStr "Set a master password.\n"
-            newMasterPassword <- getLine
+            newMasterPassword <- passwordLengthLoop
             salt <- generateSalt
-            print salt
             passDigest <- generatePassDigest newMasterPassword salt
             createDirectoryIfMissing False "resources"
             writeBin salt (digestPassHash passDigest)
@@ -69,6 +67,19 @@ main = do
                 else do
                         putStr "Incorrect password.\n"
                         passwordLoop binData
+        passwordLengthLoop :: IO String
+        passwordLengthLoop = do
+            putStr "Set a master password between 10-128 characters.\n"
+            newMasterPassword <- getLine
+            if (length newMasterPassword) < 10
+                then do 
+                    putStr "Password is too short.\n"
+                    passwordLengthLoop
+                else if (length newMasterPassword) > 128
+                    then do
+                        putStr "Password is too long.\n"
+                        passwordLengthLoop
+                    else pure $ newMasterPassword
 
 
 handleLoop :: [PassInfo] -> IO ()

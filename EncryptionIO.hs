@@ -9,6 +9,7 @@ import Control.Monad
 import qualified Data.Vector as V
 import qualified Data.ByteString.Lazy as B
 import qualified Data.ByteString as BNL
+import Data.ByteString.UTF8 as BU
 import System.IO
 import GHC.TypeNats
 import Data.Finite
@@ -17,7 +18,6 @@ import Data.Word
 import Encrypter
 import GHC.ByteOrder
 import Data.Array
-import Data.ByteString.UTF8 as BU
 import Crypto.Argon2
 import System.Random
 
@@ -186,7 +186,7 @@ generatePassDigest password salt = do
                                         hashVersion = Argon2Version13, 
                                         hashLength = 48}
 
--- Generate 256-bit salt
+-- Generate 128-bit salt
 generateSalt :: IO BNL.ByteString
 generateSalt = do
     pureGen <- newStdGen
