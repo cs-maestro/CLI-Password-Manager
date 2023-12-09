@@ -26,8 +26,12 @@ data PassInfo = PassInfo
 
 instance Show PassInfo where
     show (PassInfo username password website url) =
-        "\n\nWebsite: " ++ website ++ "\nURL: " ++ url ++
-        "\nLogin Info: " ++ (show username) ++ "\nPassword: " ++ password ++ "\nPassword Strength = " ++ (getPasswordStrength password) ++ "\n"
+        "\nWebsite: " ++ website ++ "\nLogin Info: " ++ (show username) ++ "\n"
+
+showFull :: PassInfo -> String
+showFull (PassInfo username password website url) =
+    "\n\nWebsite: " ++ website ++ "\nURL: " ++ url ++
+    "\nLogin Info: " ++ (show username) ++ "\nPassword: " ++ password ++ "\nPassword Strength = " ++ (getPasswordStrength password) ++ "\n"    
 
 main :: IO ()
 main = do
@@ -86,7 +90,7 @@ handleLoop :: [PassInfo] -> IO ()
 handleLoop masterList = do
     putStr ("\nThere are " ++ (show (length masterList)) ++ " passwords saved.\n")
     putStr "Enter a Command\n"
-    putStr "All|Add|Delete|Get|Import|Export|Save|Quit\n"
+    putStr "All|Add|Search|Import|Export|Quit\n"
     nextCommand <- getLine
     if (nextCommand == "Quit")
         then putStr "Goodbye\n"
@@ -106,18 +110,93 @@ handleLoop masterList = do
                     then do 
                         putStr("This Information already exists.\n")
                         handleLoop masterList
-                    else handleLoop (masterList ++ [(PassInfo newusernames newPassword newWebsite newURL)])
-            "Delete" -> do
-                putStr("Enter a website.\n")
-                websiteToDelete <- getLine
-                putStr("Enter a password.\n")
-                passwordToDelete <- getLine
-                handleLoop (deleteFromInfoList websiteToDelete passwordToDelete masterList)
-            "Get" -> do 
-                putStr ("Enter a username.\n")
-                line <- getLine
-                putStr (show (fetchFromUsername line masterList))
-                handleLoop masterList
+                    else do
+                        exportPasswordInfo "resources\\info.txt" (masterList ++ [(PassInfo newusernames newPassword newWebsite newURL)])
+                        handleLoop (masterList ++ [(PassInfo newusernames newPassword newWebsite newURL)])
+            "Search" -> do 
+                putStr ("Do you want to search by.\n")
+                putStr ("Userkey|Website|Password.\n")
+                searchType <- getLine
+                case searchType of
+                    "Userkey" -> do
+                        putStr ("Enter a Userkey.\n")
+                        line <- getLine
+                        putStr ("\nInfo that uses that Userkey.\n")
+                        putStr (show (fetchFromUsername line masterList))
+
+                        putStr ("\nPick a specific info?\n")
+                        numberToPick <- getLine
+                        let num = read numberToPick :: Int
+                        
+                        let specificPassInfo = ((fetchFromUsername line masterList)!!num)
+
+                        putStr (showFull specificPassInfo)
+                        putStr ("Do you want to Delete|Edit|Return\n")
+                        option <- getLine
+
+                        case option of
+                            "Delete" -> do
+                                exportPasswordInfo "resources\\info.txt" (filter (/= specificPassInfo) masterList)
+                                handleLoop (filter (/= specificPassInfo) masterList)
+                            "Edit" -> do
+                                newInfo <- (handleEdit specificPassInfo)
+                                exportPasswordInfo "resources\\info.txt" ((filter (/= specificPassInfo) masterList) ++ [newInfo])
+                                handleLoop ((filter (/= specificPassInfo) masterList) ++ [newInfo])
+                            "Return" -> do
+                                handleLoop masterList
+                    "Website" -> do
+                        putStr ("Enter a website.\n")
+                        line <- getLine
+                        putStr ("\nInfo that uses that website.\n")
+                        putStr (show (fetchFromWebsite line masterList))
+
+                        putStr ("\nPick a specific info?\n")
+                        numberToPick <- getLine
+                        let num = read numberToPick :: Int
+
+                        let specificPassInfo = ((fetchFromWebsite line masterList)!!num)
+
+                        putStr (showFull specificPassInfo)
+                        putStr ("Do you want to Delete|Edit|Return\n")
+                        option <- getLine
+
+                        case option of
+                            "Delete" -> do
+                                exportPasswordInfo "resources\\info.txt" (filter (/= specificPassInfo) masterList)
+                                handleLoop (filter (/= specificPassInfo) masterList)
+                            "Edit" -> do
+                                newInfo <- (handleEdit specificPassInfo)
+                                exportPasswordInfo "resources\\info.txt" ((filter (/= specificPassInfo) masterList) ++ [newInfo])
+                                handleLoop ((filter (/= specificPassInfo) masterList) ++ [newInfo])
+                            "Return" -> do
+                                handleLoop masterList
+                    "Password" -> do
+                        putStr ("Enter a password.\n")
+                        line <- getLine
+                        putStr ("\nInfo that uses that password.\n")
+                        putStr (show (fetchFromPassword line masterList))
+
+                        putStr ("\nPick a specific info?\n")
+                        numberToPick <- getLine
+                        let num = read numberToPick :: Int
+
+                        let specificPassInfo = ((fetchFromPassword line masterList)!!num)
+                        
+                        putStr (showFull specificPassInfo)
+                        putStr ("Do you want to Delete|Edit|Return\n")
+                        option <- getLine
+
+                        case option of
+                            "Delete" -> do
+                                exportPasswordInfo "resources\\info.txt" (filter (/= specificPassInfo) masterList)
+                                handleLoop (filter (/= specificPassInfo) masterList)
+                            "Edit" -> do
+                                newInfo <- (handleEdit specificPassInfo)
+                                exportPasswordInfo "resources\\info.txt" ((filter (/= specificPassInfo) masterList) ++ [newInfo])
+                                handleLoop ((filter (/= specificPassInfo) masterList) ++ [newInfo])
+                            "Return" -> do
+                                handleLoop masterList
+                    dfault -> handleLoop masterList
             "Import" -> do
                 putStr("Please enter a file path.\n")
                 filePath <- getLine
@@ -128,12 +207,31 @@ handleLoop masterList = do
                 filePath <- getLine
                 exportPasswordInfo filePath masterList
                 handleLoop masterList
-            "Save" -> do
-                exportPasswordInfo "resources\\info.txt" masterList
-                handleLoop masterList
             dfault -> do
                 putStr("Command not recognized.\n")
                 handleLoop masterList
+
+handleEdit :: PassInfo -> IO PassInfo
+handleEdit (PassInfo username password website url) = do
+    putStr ("Do you want to change the Userkeys|Password|Website|URL|Done\n")
+    toChange <- getLine
+    case toChange of
+        "Userkeys" -> do
+            newusernames <- (getUsernamesFromUser [])
+            handleEdit (PassInfo newusernames password website url)
+        "Password" -> do
+            putStr ("Enter a new password\n")
+            input <- getLine
+            handleEdit (PassInfo username input website url)
+        "Website" -> do
+            putStr ("Enter a new website\n")
+            input <- getLine
+            handleEdit (PassInfo username password input url)
+        "URL" -> do
+            putStr ("Enter a new URL\n")
+            input <- getLine
+            handleEdit (PassInfo username password website input)
+        "Done" -> return (PassInfo username password website url)
 
 -- Gets a list of UsernameData from the user
 getUsernamesFromUser :: [UsernameData] -> IO [UsernameData]
@@ -186,18 +284,19 @@ fetchFromUsername username ((PassInfo usernames password website url):xs) =
         hasUsename username ((Email s):xs) = if (username == s) then True else (hasUsename username xs)
         hasUsename username ((PhoneNumber s):xs) = if (username == s) then True else (hasUsename username xs)
 
--- Returns a list of PassInfo without one given a website and password.
-deleteFromInfoList :: String -> String -> [PassInfo] -> [PassInfo]
-deleteFromInfoList website password [] = []
-deleteFromInfoList website password infoList = filter (compareWebAndPass website password) infoList
-    where
-        compareWebAndPass :: String -> String -> PassInfo -> Bool
-        compareWebAndPass web pass (PassInfo usernames password website url) =
-            if (web == website)
-                then if (pass == password)
-                    then False
-                    else True
-                else True
+fetchFromWebsite :: String -> [PassInfo] -> [PassInfo]
+fetchFromWebsite searchFor [] = []
+fetchFromWebsite searchFor ((PassInfo usernames password website url):xs) = 
+        if (searchFor == website)
+        then (PassInfo usernames password website url) : (fetchFromWebsite searchFor xs)
+        else (fetchFromWebsite searchFor xs)
+
+fetchFromPassword :: String -> [PassInfo] -> [PassInfo]
+fetchFromPassword searchFor [] = []
+fetchFromPassword searchFor ((PassInfo usernames password website url):xs) = 
+        if (searchFor == password)
+        then (PassInfo usernames password website url) : (fetchFromPassword searchFor xs)
+        else (fetchFromPassword searchFor xs)
 
 -- Creates a PassInfo list from a list of lists of strings.
 createPassInfoList :: [[String]] -> [PassInfo]
