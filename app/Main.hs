@@ -2,73 +2,84 @@
 
 module Main where
 
-import System.IO
 import System.Exit
-import System.Random
 import Control.Monad (void)
-
-
-import Encrypter
-import EncryptionIO
 import Lib
-import CSVHandler
 
 main :: IO ()
 main = do
-  putStrLn "Welcome to the Password Manager CLI!"
-  putStrLn "1. Search by keyword"
-  putStrLn "2. Website lookup"
-  putStrLn "3. Generate random password"
-  putStrLn "4. Exit"
-  putStrLn "Choose an option (1-4):"
+    putStrLn "Welcome to the Password Manager CLI!"
+    putStrLn "1. Search by keyword"
+    putStrLn "2. Validate Website URL"
+    putStrLn "3. Generate random password"
+    putStrLn "4. Exit"
+    putStrLn "Choose an option (1-4):"
 
-  choice <- getLine
-  case choice of
-    "1" -> searchByKeyword
-    "2" -> websiteLookup
-    "3" -> generateRandomPasswordCLI
-    "4" -> exitSuccess
-    _   -> putStrLn "Invalid choice." >> main
+    choice <- getLine
+    case choice of
+        "1" -> searchByKeyword >> main
+        "2" -> validateWebsiteURL >> main
+        "3" -> generateRandomPasswordCLI >> main
+        "4" -> exitSuccess
+        _   -> putStrLn "Invalid choice." >> main
 
 generateRandomPasswordCLI :: IO ()
 generateRandomPasswordCLI = do
-  putStrLn "Include symbols in the password? (yes/no)"
-  useSymbols <- getLine
-  putStrLn "Include numbers in the password? (yes/no)"
-  useNumbers <- getLine
-  putStrLn "Enter password length:"
-  passwordLength <- readLn
-  generatedPassword <- generateRandomPassword (useSymbols == "yes") (useNumbers == "yes") passwordLength
-  putStrLn $ "Generated password: " ++ generatedPassword
+  putStrLn "1. Generate a new password"
+  putStrLn "2. Back to main menu"
+  putStrLn "Choose an option (1-2):"
+  choice <- getLine
+  case choice of
+    "1" -> do
+      putStrLn "Include symbols in the password? (yes/no)"
+      useSymbols <- getLine
+      putStrLn "Include numbers in the password? (yes/no)"
+      useNumbers <- getLine
+      putStrLn "Enter password length:"
+      passwordLength <- readLn
 
-  putStrLn "Press Enter to go back to the main menu."
-  void getLine
+      let includeSymbols = useSymbols == "yes"
+          includeNumbers = useNumbers == "yes"
+
+      generatedPassword <- generateRandomPassword passwordLength
+
+      putStrLn $ "Generated password: " ++ generatedPassword
+      generateRandomPasswordCLI
+    "2" -> main
+    _   -> putStrLn "Invalid choice." >> generateRandomPasswordCLI
 
 searchByKeyword :: IO ()
 searchByKeyword = do
-  putStrLn "Enter search keyword:"
-  keyword <- getLine
+  putStrLn "1. Search for a keyword"
+  putStrLn "2. Back to main menu"
+  putStrLn "Choose an option (1-2):"
+  choice <- getLine
+  case choice of
+    "1" -> do
+      putStrLn "Enter search keyword:"
+      keyword <- getLine
 
-  let haystack = "This is a sample text with a keyword."
-  let positions = boyerMooreSearch keyword haystack
-  putStrLn $ "Keyword found at positions: " ++ show positions
+      let haystack = "This is a sample text with a keyword. This keyword is used as an example."
+      let positions = boyerMooreSearch keyword haystack
+      putStrLn $ "Keyword found at positions: " ++ show positions
+      searchByKeyword
+    "2" -> main
+    _   -> putStrLn "Invalid choice." >> searchByKeyword
 
-  putStrLn "Press Enter to go back to the main menu."
-  void getLine
+validateWebsiteURL :: IO ()
+validateWebsiteURL = do
+  putStrLn "1. Validate a URL"
+  putStrLn "2. Back to main menu"
+  putStrLn "Choose an option (1-2):"
+  choice <- getLine
+  case choice of
+    "1" -> do
+      putStrLn "Enter a URL:"
+      url <- getLine
 
-websiteLookup :: IO ()
-websiteLookup = do
-  putStrLn "Enter search keyword:"
-  keyword <- getLine
-
-  searchResults <- googleSearch keyword
-  putStrLn "Top 5 Google results:"
-  mapM_ putStrLn $ zipWith (\i result -> show i ++ ". " ++ result) [1..] searchResults
-
-  putStrLn "Choose a URL from the list (enter the corresponding number):"
-  chosenIndex <- readLn
-  let chosenURL = searchResults !! (chosenIndex - 1)
-  putStrLn $ "Chosen URL: " ++ chosenURL
-
-  putStrLn "Press Enter to go back to the main menu."
-  void getLine
+      if validateURL url
+          then putStrLn "Valid URL."
+          else putStrLn "Invalid URL."
+      validateWebsiteURL
+    "2" -> main
+    _   -> putStrLn "Invalid choice." >> validateWebsiteURL
