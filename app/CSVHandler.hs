@@ -1,4 +1,3 @@
-module Main where
 import System.Directory
 import Data.List.Split
 import EncryptionIO
