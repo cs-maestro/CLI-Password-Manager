@@ -37,11 +37,17 @@ boyerMooreSearch needle haystack = search 0
         chunk = take len (drop i haystack)
         offset xs ys = length (takeWhile (/= ys) (inits xs))
 
-generateRandomPassword :: Int -> IO String
-generateRandomPassword length' = do
+generateRandomPassword :: Int -> Bool -> Bool -> IO String
+generateRandomPassword length' useSymbols useNumbers = do
   gen <- newStdGen
-  let symbols = "!@#$%^&*()_+-=[]{}|;:,.<>?/"
-      numbers = "0123456789"
-      chars = ['a'..'z'] ++ ['A'..'Z'] ++ symbols ++ numbers
-      password = map (chars !!) $ take length' $ randomRs (0, length chars - 1) gen
+  let password = map (chars !!) $ take length' $ randomRs (0, length chars - 1) gen
   return password
+  where 
+    symbols = if useSymbols
+      then "!@#$%^&*()_+-=[]{}|;:,.<>?/"
+      else ""
+    numbers = if useNumbers
+      then "0123456789"
+      else ""
+    chars = ['a'..'z'] ++ ['A'..'Z'] ++ symbols ++ numbers
+

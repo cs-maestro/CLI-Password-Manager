@@ -1,5 +1,16 @@
-module CSVHandler where
+module CSVHandler (
+    UsernameData,
+    PassInfo,
+    PasswordStrength (Strong, Medium, Weak, VeryWeak),
+    yesNoLoop,
+    getPasswordStrength,
+    handleLoop,
+    createPassInfoList,
+    stringToList,
+    passwordLoop
+) where
 
+import Lib
 import System.Directory
 import Data.List.Split
 import EncryptionIO
@@ -12,6 +23,7 @@ import Data.Binary.Put
 import Data.Char
 import System.Hclip
 import System.IO
+import Text.Read
 
 data UsernameData = Username String | Email String | PhoneNumber String deriving (Eq)
 
@@ -64,80 +76,7 @@ showFull :: PassInfo -> String
 showFull (PassInfo username password website url) =
     "\n\nWebsite: " ++ website ++ "\nURL: " ++ url ++
     "\nLogin Info: " ++ (show username) ++ "\nPassword: " ++ password ++ "\nPassword Strength = " ++ 
-        (show (getPasswordStrength password)) ++ "\n"    
-
-main :: IO ()
-main = do
-    putStr "Haskel Password Manager:\n"
-    dfe <- doesFileExist "resources\\encInfo.bin"
-    if (dfe == False)
-        then do 
-            newMasterPassword <- newPasswordLoop
-            salt <- generateSalt
-            passDigest <- generatePassDigest newMasterPassword salt
-            createDirectoryIfMissing False "resources"
-            writeBin "resources\\data.bin" salt (digestPassHash passDigest)
-            handleLoop []
-            
-            let key = mkVec (runGet (V.replicateM 4 getWord32host) (BNL.fromStrict (digestKey passDigest))) :: Word128
-            encryptFile "resources\\info.txt" "resources\\encInfo.bin" key
-            removeFile "resources\\info.txt"
-        else do
-            binData <- readBin "resources\\data.bin"
-            key <- passwordLoop binData
-            decryptFile "resources\\encInfo.bin" "resources\\info.txt" key
-            tsv <- readFile "resources\\info.txt"
-            let stl = stringToList tsv
-            let importedInfoList = createPassInfoList stl
-            handleLoop importedInfoList
-            
-            encryptFile "resources\\info.txt" "resources\\encInfo.bin" key
-            removeFile "resources\\info.txt"
-    where
-        newPasswordLoop :: IO String
-        newPasswordLoop = do
-            putStr "Set a master password between 10-128 characters:\n"
-            hSetBuffering stdin NoBuffering
-            hSetEcho stdin False
-            newPassword <- getLine
-            hSetBuffering stdin LineBuffering
-            hSetEcho stdin True
-            if (length newPassword) < 10
-                then do 
-                    putStr "Password is too short. Please try again.\n\n"
-                    newPasswordLoop
-                else if (length newPassword) > 128
-                    then do
-                        putStr "Password is too long.Please try again\n\n"
-                        newPasswordLoop
-                    else do
-                        putStr "Enter the password again:\n"
-                        hSetBuffering stdin NoBuffering
-                        hSetEcho stdin False
-                        newPassword2 <- getLine
-                        hSetBuffering stdin LineBuffering
-                        hSetEcho stdin True
-                        if newPassword == newPassword2
-                            then strengthLoop newPassword
-                            else do
-                                putStr "Sorry, the password's didn't match.\n\n"
-                                newPasswordLoop
-        strengthLoop :: String -> IO String
-        strengthLoop newPassword = do
-            let ps = getPasswordStrength newPassword
-            if ps < Strong
-                then do
-                    putStr $ "Your password has " ++ (show ps) ++ " strength.\n"
-                    putStr "Warning: Your master password is what protects all your other passwords, so it should be strong.\n"
-                    putStr "Consider adding special characters, numbers, upper and lowercase characters, or increasing its length.\n"
-                    putStr "Are you sure you wish to proceed?\n"
-                    yn <- yesNoLoop
-                    if yn
-                        then pure newPassword
-                        else newPasswordLoop
-                else pure newPassword
-
-                                
+        (show (getPasswordStrength password)) ++ "\n"  
 
 passwordLoop :: BinData -> IO Word128
 passwordLoop binData = do
@@ -213,36 +152,51 @@ handleLoop masterList = do
 
 addPasswordLoop :: [PassInfo] -> IO String
 addPasswordLoop ls = do
-    putStr "Enter a password:\n"
-    hSetBuffering stdin NoBuffering
-    hSetEcho stdin False
-    newPassword <- getLine
-    hSetBuffering stdin LineBuffering
-    hSetEcho stdin True
-
-    putStr "Please enter the password again:\n"
-    hSetBuffering stdin NoBuffering
-    hSetEcho stdin False
-    newPassword2 <- getLine
-    hSetBuffering stdin LineBuffering
-    hSetEcho stdin True
-
-    if newPassword == newPassword2
+    putStr "Would you like to generate a new random password?\n"
+    yn <- yesNoLoop
+    if yn
         then do
-            let numDupPass = numDuplicatePass ls newPassword
-            if numDupPass > 0 
-                then do
-                    putStr $ "I found " ++ (show numDupPass) ++ " duplicate password(s).\n"
-                    putStr "Are you sure you want to proceed with this password?\n"
-                    yn <- yesNoLoop
-                    if yn
-                        then strengthLoop ls newPassword
-                        else addPasswordLoop ls
-                else strengthLoop ls newPassword
-                    
+            putStr "Include symbols in the password?\n"
+            useSymbols <- yesNoLoop
+            putStr "Include numbers in the password?\n"
+            useNumbers <- yesNoLoop
+            passwordLength <- readIntLoop
+
+            generatedPassword <- generateRandomPassword passwordLength useSymbols useNumbers
+
+            putStrLn $ "Your Generated password is: " ++ generatedPassword
+            pure generatedPassword
         else do
-            putStr "Sorry, these passwords don't match. Try again.\n\n"
-            addPasswordLoop ls
+            putStr "Enter a password:\n"
+            hSetBuffering stdin NoBuffering
+            hSetEcho stdin False
+            newPassword <- getLine
+            hSetBuffering stdin LineBuffering
+            hSetEcho stdin True
+
+            putStr "Please enter the password again:\n"
+            hSetBuffering stdin NoBuffering
+            hSetEcho stdin False
+            newPassword2 <- getLine
+            hSetBuffering stdin LineBuffering
+            hSetEcho stdin True
+
+            if newPassword == newPassword2
+                then do
+                    let numDupPass = numDuplicatePass ls newPassword
+                    if numDupPass > 0 
+                        then do
+                            putStr $ "I found " ++ (show numDupPass) ++ " duplicate password(s).\n"
+                            putStr "Are you sure you want to proceed with this password?\n"
+                            yn <- yesNoLoop
+                            if yn
+                                then strengthLoop ls newPassword
+                                else addPasswordLoop ls
+                        else strengthLoop ls newPassword
+                            
+                else do
+                    putStr "Sorry, these passwords don't match. Try again.\n\n"
+                    addPasswordLoop ls
     where
         strengthLoop :: [PassInfo] -> String -> IO String
         strengthLoop ls newPassword = do
@@ -257,6 +211,22 @@ addPasswordLoop ls = do
                         then pure newPassword
                         else addPasswordLoop ls
                 else pure newPassword
+        readIntLoop :: IO Int
+        readIntLoop = do
+            putStr "Enter password length between 3 and 128 characters:\n"
+            passLen <- getLine
+            case readMaybe passLen :: Maybe Int of
+                Just n | n < 3 -> do
+                            putStr "Length too short. Please try again.\n\n"
+                            readIntLoop
+                       | n > 128 -> do
+                        putStr "Length too long. Please try again.\n\n"
+                        readIntLoop
+                       | otherwise -> pure n
+                Nothing -> do
+                    putStr "Please enter a valid integer number.\n\n"
+                    readIntLoop
+
 
 -- Asks user for website nickname and url. If a matching website name is found from
 -- the given list, then the corresponding URL is used. Else asks for a url. This url
@@ -280,17 +250,22 @@ urlLoop :: [PassInfo] -> String -> IO (String, String)
 urlLoop masterList websiteName = do
     putStr("Enter a URL:\n")
     newURL <- getLine
-    case duplicateURL masterList newURL of
-        Just dupWebName -> do
-            putStr("Duplicate url found with nickname \"" ++ dupWebName ++ "\"\n")
-            putStr("Would you like to use this website name instead?\n")
-            yn <- yesNoLoop
-            if yn
-                then pure (dupWebName, newURL)
-                else do
-                    putStr "Please enter a new URL.\n"
-                    urlLoop masterList websiteName
-        otherwise -> pure (websiteName, newURL)
+    if validateURL newURL
+        then
+            case duplicateURL masterList newURL of
+                Just dupWebName -> do
+                    putStr("Duplicate URL found with nickname \"" ++ dupWebName ++ "\"\n")
+                    putStr("Would you like to use this website name instead?\n")
+                    yn <- yesNoLoop
+                    if yn
+                        then pure (dupWebName, newURL)
+                        else do
+                            putStr "Please enter a new URL.\n"
+                            urlLoop masterList websiteName
+                otherwise -> pure (websiteName, newURL)
+        else do
+            putStr "URL has an invalid format. Please try again.\n\n"
+            urlLoop masterList websiteName
 
 -- Ask user yes or no prompt. Returns true if the answer is yes, false if no.                
 yesNoLoop :: IO Bool
@@ -397,7 +372,7 @@ handleSearch masterList = do
                             x <- getChar
                             hSetBuffering stdin LineBuffering
                             hSetEcho stdin True
-                            putStr "Password cleared from clipboard.\n"
+                            putStr "Password cleared from clipboard.\n\n"
                             setClipboard ""
                             optionLoop specificPassInfo masterList
                         "Return" -> do
@@ -456,7 +431,7 @@ getUsernamesFromUser acc = if null outputOptions
     then pure acc
     else do
         putStr("Do you want to add a " ++ (go outputOptions) ++ ".\n")
-        putStr("Type 'Done' to stop.\n")
+        putStr("Type 'Done' to continue.\n")
         newUsernameType <- getLine
         case newUsernameType of
             "Done" -> return acc
