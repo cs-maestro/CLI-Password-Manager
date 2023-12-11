@@ -9,6 +9,9 @@ import qualified Data.ByteString.Lazy as B
 import qualified Data.ByteString as BNL
 import Data.Binary.Get
 import Data.Binary.Put
+import Data.Char
+import System.Hclip
+import System.IO
 
 data UsernameData = Username String | Email String | PhoneNumber String deriving (Eq)
 
@@ -29,10 +32,39 @@ instance Show PassInfo where
     show (PassInfo username password website url) =
         "\nWebsite: " ++ website ++ "\nLogin Info: " ++ (show username) ++ "\n"
 
+data PasswordStrength = Strong | Medium | Weak | VeryWeak
+    deriving (Eq)
+
+instance Show PasswordStrength where
+    show Strong = "strong"
+    show Medium = "medium"
+    show Weak = "weak"
+    show VeryWeak = "very weak"
+
+instance Ord PasswordStrength where
+    Medium <= Strong = True
+    Strong <= Medium = False
+    Weak <= Medium = True
+    Medium <= Weak = False
+    VeryWeak <= Weak = True
+    Weak <= VeryWeak = False
+    Weak <= Strong = True
+    Strong <= Weak = False
+    VeryWeak <= Strong = True
+    Strong <= VeryWeak = False
+    VeryWeak <= Medium = True
+    Medium <= VeryWeak = False
+
+getUsernameDataStr :: UsernameData -> String
+getUsernameDataStr (Username str) = str
+getUsernameDataStr (Email str) = str
+getUsernameDataStr (PhoneNumber str) = str
+
 showFull :: PassInfo -> String
 showFull (PassInfo username password website url) =
     "\n\nWebsite: " ++ website ++ "\nURL: " ++ url ++
-    "\nLogin Info: " ++ (show username) ++ "\nPassword: " ++ password ++ "\nPassword Strength = " ++ (getPasswordStrength password) ++ "\n"    
+    "\nLogin Info: " ++ (show username) ++ "\nPassword: " ++ password ++ "\nPassword Strength = " ++ 
+        (show (getPasswordStrength password)) ++ "\n"    
 
 main :: IO ()
 main = do
@@ -40,18 +72,18 @@ main = do
     dfe <- doesFileExist "resources\\encInfo.bin"
     if (dfe == False)
         then do 
-            newMasterPassword <- passwordLengthLoop
+            newMasterPassword <- newPasswordLoop
             salt <- generateSalt
             passDigest <- generatePassDigest newMasterPassword salt
             createDirectoryIfMissing False "resources"
-            writeBin salt (digestPassHash passDigest)
+            writeBin "resources\\data.bin" salt (digestPassHash passDigest)
             handleLoop []
             
             let key = mkVec (runGet (V.replicateM 4 getWord32host) (BNL.fromStrict (digestKey passDigest))) :: Word128
             encryptFile "resources\\info.txt" "resources\\encInfo.bin" key
             removeFile "resources\\info.txt"
         else do
-            binData <- readBin
+            binData <- readBin "resources\\data.bin"
             key <- passwordLoop binData
             decryptFile "resources\\encInfo.bin" "resources\\info.txt" key
             tsv <- readFile "resources\\info.txt"
@@ -62,30 +94,65 @@ main = do
             encryptFile "resources\\info.txt" "resources\\encInfo.bin" key
             removeFile "resources\\info.txt"
     where
-        passwordLoop :: BinData -> IO Word128
-        passwordLoop binData = do
-            putStr "Please enter the master password.\n"
-            userMasterPassword <- getLine
-            passDigest <- generatePassDigest userMasterPassword $ binSalt binData
-            if (binPassHash binData) == (digestPassHash passDigest)
-                then pure (mkVec (runGet (V.replicateM 4 getWord32host) (BNL.fromStrict (digestKey passDigest))) :: Word128)
-                else do
-                        putStr "Incorrect password.\n"
-                        passwordLoop binData
-        passwordLengthLoop :: IO String
-        passwordLengthLoop = do
-            putStr "Set a master password between 10-128 characters.\n"
-            newMasterPassword <- getLine
-            if (length newMasterPassword) < 10
+        newPasswordLoop :: IO String
+        newPasswordLoop = do
+            putStr "Set a master password between 10-128 characters:\n"
+            hSetBuffering stdin NoBuffering
+            hSetEcho stdin False
+            newPassword <- getLine
+            hSetBuffering stdin LineBuffering
+            hSetEcho stdin True
+            if (length newPassword) < 10
                 then do 
-                    putStr "Password is too short.\n"
-                    passwordLengthLoop
-                else if (length newMasterPassword) > 128
+                    putStr "Password is too short. Please try again.\n\n"
+                    newPasswordLoop
+                else if (length newPassword) > 128
                     then do
-                        putStr "Password is too long.\n"
-                        passwordLengthLoop
-                    else pure $ newMasterPassword
+                        putStr "Password is too long.Please try again\n\n"
+                        newPasswordLoop
+                    else do
+                        putStr "Enter the password again:\n"
+                        hSetBuffering stdin NoBuffering
+                        hSetEcho stdin False
+                        newPassword2 <- getLine
+                        hSetBuffering stdin LineBuffering
+                        hSetEcho stdin True
+                        if newPassword == newPassword2
+                            then strengthLoop newPassword
+                            else do
+                                putStr "Sorry, the password's didn't match.\n\n"
+                                newPasswordLoop
+        strengthLoop :: String -> IO String
+        strengthLoop newPassword = do
+            let ps = getPasswordStrength newPassword
+            if ps < Strong
+                then do
+                    putStr $ "Your password has " ++ (show ps) ++ " strength.\n"
+                    putStr "Warning: Your master password is what protects all your other passwords, so it should be strong.\n"
+                    putStr "Consider adding special characters, numbers, upper and lowercase characters, or increasing its length.\n"
+                    putStr "Are you sure you wish to proceed?\n"
+                    yn <- yesNoLoop
+                    if yn
+                        then pure newPassword
+                        else newPasswordLoop
+                else pure newPassword
 
+                                
+
+passwordLoop :: BinData -> IO Word128
+passwordLoop binData = do
+    putStr "Please enter the master password.\n"
+    hSetBuffering stdin NoBuffering
+    hSetEcho stdin False
+    userMasterPassword <- getLine
+    hSetBuffering stdin LineBuffering
+    hSetEcho stdin True
+    passDigest <- generatePassDigest userMasterPassword $ binSalt binData
+    if (binPassHash binData) == (digestPassHash passDigest)
+        then pure (mkVec (runGet (V.replicateM 4 getWord32host) (BNL.fromStrict (digestKey passDigest))) :: Word128)
+        else do
+            putStr "Incorrect password.\n"
+            passwordLoop binData
 
 handleLoop :: [PassInfo] -> IO ()
 handleLoop masterList = do
@@ -94,167 +161,374 @@ handleLoop masterList = do
     putStr "All|Add|Search|Import|Export|Quit\n"
     nextCommand <- getLine
     if (nextCommand == "Quit")
-        then putStr "Goodbye\n"
+        then do
+            putStr "Goodbye\n"
+            exportPasswordInfo "resources\\info.txt" masterList
         else case nextCommand of
             "All" -> do
-                putStr (show masterList)
+                putStr $ concat $ map show masterList
                 handleLoop masterList
             "Add" -> do 
                 newusernames <- (getUsernamesFromUser [])
-                putStr("Enter a website.\n")
-                newWebsite <- getLine
-                putStr("Enter a URL.\n")
-                newURL <- getLine
-                putStr("Enter a password.\n")
-                newPassword <- getLine
-                if (duplicateInfo (masterList ++ [(PassInfo newusernames newPassword newWebsite newURL)]))
+                (newWebsite, newURL) <- websiteLoop masterList
+                newPassword <- addPasswordLoop masterList
+                
+                if (duplicateInfo masterList (PassInfo newusernames newPassword newWebsite newURL))
                     then do 
-                        putStr("This Information already exists.\n")
+                        putStr("This account already exists.\n")
+                        putStr("Please check your passwords again.\n")
                         handleLoop masterList
                     else do
-                        exportPasswordInfo "resources\\info.txt" (masterList ++ [(PassInfo newusernames newPassword newWebsite newURL)])
                         handleLoop (masterList ++ [(PassInfo newusernames newPassword newWebsite newURL)])
-            "Search" -> do 
-                putStr ("Do you want to search by.\n")
-                putStr ("Userkey|Website|Password.\n")
-                searchType <- getLine
-                case searchType of
-                    "Userkey" -> do
-                        putStr ("Enter a Userkey.\n")
-                        line <- getLine
-                        putStr ("\nInfo that uses that Userkey.\n")
-                        putStr (show (fetchFromUsername line masterList))
-
-                        putStr ("\nPick a specific info?\n")
-                        numberToPick <- getLine
-                        let num = read numberToPick :: Int
-                        
-                        let specificPassInfo = ((fetchFromUsername line masterList)!!num)
-
-                        putStr (showFull specificPassInfo)
-                        putStr ("Do you want to Delete|Edit|Return\n")
-                        option <- getLine
-
-                        case option of
-                            "Delete" -> do
-                                exportPasswordInfo "resources\\info.txt" (filter (/= specificPassInfo) masterList)
-                                handleLoop (filter (/= specificPassInfo) masterList)
-                            "Edit" -> do
-                                newInfo <- (handleEdit specificPassInfo)
-                                exportPasswordInfo "resources\\info.txt" ((filter (/= specificPassInfo) masterList) ++ [newInfo])
-                                handleLoop ((filter (/= specificPassInfo) masterList) ++ [newInfo])
-                            "Return" -> do
-                                handleLoop masterList
-                    "Website" -> do
-                        putStr ("Enter a website.\n")
-                        line <- getLine
-                        putStr ("\nInfo that uses that website.\n")
-                        putStr (show (fetchFromWebsite line masterList))
-
-                        putStr ("\nPick a specific info?\n")
-                        numberToPick <- getLine
-                        let num = read numberToPick :: Int
-
-                        let specificPassInfo = ((fetchFromWebsite line masterList)!!num)
-
-                        putStr (showFull specificPassInfo)
-                        putStr ("Do you want to Delete|Edit|Return\n")
-                        option <- getLine
-
-                        case option of
-                            "Delete" -> do
-                                exportPasswordInfo "resources\\info.txt" (filter (/= specificPassInfo) masterList)
-                                handleLoop (filter (/= specificPassInfo) masterList)
-                            "Edit" -> do
-                                newInfo <- (handleEdit specificPassInfo)
-                                exportPasswordInfo "resources\\info.txt" ((filter (/= specificPassInfo) masterList) ++ [newInfo])
-                                handleLoop ((filter (/= specificPassInfo) masterList) ++ [newInfo])
-                            "Return" -> do
-                                handleLoop masterList
-                    "Password" -> do
-                        putStr ("Enter a password.\n")
-                        line <- getLine
-                        putStr ("\nInfo that uses that password.\n")
-                        putStr (show (fetchFromPassword line masterList))
-
-                        putStr ("\nPick a specific info?\n")
-                        numberToPick <- getLine
-                        let num = read numberToPick :: Int
-
-                        let specificPassInfo = ((fetchFromPassword line masterList)!!num)
-                        
-                        putStr (showFull specificPassInfo)
-                        putStr ("Do you want to Delete|Edit|Return\n")
-                        option <- getLine
-
-                        case option of
-                            "Delete" -> do
-                                exportPasswordInfo "resources\\info.txt" (filter (/= specificPassInfo) masterList)
-                                handleLoop (filter (/= specificPassInfo) masterList)
-                            "Edit" -> do
-                                newInfo <- (handleEdit specificPassInfo)
-                                exportPasswordInfo "resources\\info.txt" ((filter (/= specificPassInfo) masterList) ++ [newInfo])
-                                handleLoop ((filter (/= specificPassInfo) masterList) ++ [newInfo])
-                            "Return" -> do
-                                handleLoop masterList
-                    dfault -> handleLoop masterList
+            "Search" -> handleSearch masterList
             "Import" -> do
-                putStr("Please enter a file path.\n")
-                filePath <- getLine
-                newInfo <- readFile filePath
-                handleLoop (dropDuplicateInfo (masterList ++ (createPassInfoList (stringToList newInfo))))
+                putStr("Please enter a file path for hash bin file.\n")
+                fileBinPath <- getLine
+                putStr("Please enter a file path for the main data file.\n")
+                fileDataPath <- getLine
+                imported <- importEncPasswordInfo fileBinPath fileDataPath
+                if imported
+                    then do
+                        newInfo <- readFile "tempImport.txt"
+                        let newLs = (dropDuplicateInfo (masterList ++ (createPassInfoList (stringToList newInfo))))
+                        exportPasswordInfo "resources\\info.txt" newLs
+                        tsv <- readFile "resources\\info.txt"
+                        let stl = stringToList tsv
+                        let importedInfoList = createPassInfoList stl
+                        removeFile "tempImport.txt"
+                        handleLoop importedInfoList
+                    else do
+                        putStr "Unable to import password info.\n"
+                        handleLoop masterList
             "Export" -> do
-                putStr("Please enter a file path.\n")
-                filePath <- getLine
-                exportPasswordInfo filePath masterList
+                putStr("Please enter a filname for the hash bin file.\n")
+                fileBinPath <- getLine
+                putStr("Please enter a filename for the main data file.\n")
+                fileDataPath <- getLine
+                exportEncPasswordInfo (fileBinPath ++ ".bin") (fileDataPath ++ ".dat") masterList
                 handleLoop masterList
             dfault -> do
                 putStr("Command not recognized.\n")
                 handleLoop masterList
 
-handleEdit :: PassInfo -> IO PassInfo
-handleEdit (PassInfo username password website url) = do
-    putStr ("Do you want to change the Userkeys|Password|Website|URL|Done\n")
+addPasswordLoop :: [PassInfo] -> IO String
+addPasswordLoop ls = do
+    putStr "Enter a password:\n"
+    hSetBuffering stdin NoBuffering
+    hSetEcho stdin False
+    newPassword <- getLine
+    hSetBuffering stdin LineBuffering
+    hSetEcho stdin True
+
+    putStr "Please enter the password again:\n"
+    hSetBuffering stdin NoBuffering
+    hSetEcho stdin False
+    newPassword2 <- getLine
+    hSetBuffering stdin LineBuffering
+    hSetEcho stdin True
+
+    if newPassword == newPassword2
+        then do
+            let numDupPass = numDuplicatePass ls newPassword
+            if numDupPass > 0 
+                then do
+                    putStr $ "I found " ++ (show numDupPass) ++ " duplicate password(s).\n"
+                    putStr "Are you sure you want to proceed with this password?\n"
+                    yn <- yesNoLoop
+                    if yn
+                        then strengthLoop ls newPassword
+                        else addPasswordLoop ls
+                else strengthLoop ls newPassword
+                    
+        else do
+            putStr "Sorry, these passwords don't match. Try again.\n\n"
+            addPasswordLoop ls
+    where
+        strengthLoop :: [PassInfo] -> String -> IO String
+        strengthLoop ls newPassword = do
+            let ps = getPasswordStrength newPassword
+            if ps < Medium
+                then do
+                    putStr $ "Your password has " ++ (show ps) ++ " strength.\n"
+                    putStr "Consider adding special characters, numbers, upper and lowercase characters, or increasing its length.\n"
+                    putStr "Are you sure you wish to proceed?\n"
+                    yn <- yesNoLoop
+                    if yn
+                        then pure newPassword
+                        else addPasswordLoop ls
+                else pure newPassword
+
+-- Asks user for website nickname and url. If a matching website name is found from
+-- the given list, then the corresponding URL is used. Else asks for a url. This url
+-- is then check against other website nicknames that may have this url. User is
+-- then promted to either use a new url or change nickname to matching url.
+websiteLoop :: [PassInfo] -> IO (String, String)
+websiteLoop ls = do
+    putStr ("Enter a new website name:\n")
+    input <- getLine
+    case duplicateWeb ls input of
+        Just dupURLName -> do
+            putStr "Found matching website name.\n"
+            putStr $ "Using URL \"" ++ dupURLName ++ "\"\n"
+            pure (input, dupURLName)
+        otherwise -> urlLoop ls input
+
+-- Asks user for url. Then searches list of passInfo to check for duplicates entries
+-- of given website name. The user is then given the option to change their website name
+-- to this value or use a new url.
+urlLoop :: [PassInfo] -> String -> IO (String, String)
+urlLoop masterList websiteName = do
+    putStr("Enter a URL:\n")
+    newURL <- getLine
+    case duplicateURL masterList newURL of
+        Just dupWebName -> do
+            putStr("Duplicate url found with nickname \"" ++ dupWebName ++ "\"\n")
+            putStr("Would you like to use this website name instead?\n")
+            yn <- yesNoLoop
+            if yn
+                then pure (dupWebName, newURL)
+                else do
+                    putStr "Please enter a new URL.\n"
+                    urlLoop masterList websiteName
+        otherwise -> pure (websiteName, newURL)
+
+-- Ask user yes or no prompt. Returns true if the answer is yes, false if no.                
+yesNoLoop :: IO Bool
+yesNoLoop = do
+    putStr "Enter y/n:\n"
+    input <- getLine
+    case map toLower input of
+        "y" -> pure True
+        "yes" -> pure True
+        "n" -> pure False
+        "no" -> pure False
+        otherwise -> do
+            putStr "Unrecognized input. Please try again.\n\n"
+            yesNoLoop
+
+handleSearch :: [PassInfo] -> IO ()
+handleSearch masterList = do
+    putStr ("Do you want to search by:\n")
+    putStr ("Userkey|Website|Password\n")
+    searchType <- getLine
+    case searchType of
+        "Userkey" -> do
+            infoLs <- searchUsernames masterList
+            if null infoLs
+                then do
+                    putStr "No matches found.\n"
+                    handleLoop masterList
+                else do
+                    putStr ("\nInfo that uses that Userkey:\n")
+                    printOrderedList infoLs
+                    num <- choiceLoop $ length infoLs
+                    
+                    let specificPassInfo = infoLs !! (num-1)
+
+                    optionLoop specificPassInfo masterList
+        "Website" -> do
+            putStr ("Enter a website:\n")
+            line <- getLine
+            let infoLs = fetchFromWebsite line masterList
+            if null infoLs
+                then do
+                    putStr "No matches found.\n"
+                    handleLoop masterList
+                else do
+                    putStr ("\nInfo that uses that website:\n")
+                    printOrderedList infoLs
+                    num <- choiceLoop $ length infoLs
+
+                    let specificPassInfo = infoLs !! (num-1)
+
+                    optionLoop specificPassInfo masterList
+        "Password" -> do
+            putStr ("Enter a password:\n")
+            line <- getLine
+            let infoLs = fetchFromPassword line masterList
+            if null infoLs
+                then do
+                    putStr "No matches found.\n"
+                    handleLoop masterList
+                else do
+                    putStr ("\nInfo that uses that password:\n")
+                    printOrderedList infoLs
+                    num <- choiceLoop $ length infoLs
+
+                    let specificPassInfo = infoLs !! (num-1)
+                    
+                    optionLoop specificPassInfo masterList
+        dfault -> do
+            putStr "Incorrect option. Please try again.\n\n"
+            handleSearch masterList
+    where
+        choiceLoop :: Int -> IO Int
+        choiceLoop max = do
+            putStr ("\nEnter an item number:\n")
+            numberToPick <- getLine
+            let num = read numberToPick :: Int
+            if (num > max) || (num < 1)
+                then do
+                    putStr "Invalid index.\n"
+                    choiceLoop max
+                else
+                    pure num
+        optionLoop :: PassInfo -> [PassInfo] -> IO ()
+        optionLoop specificPassInfo masterList = do
+                    putStr "Account information:"
+                    putStr (showFull specificPassInfo)
+                    putStr ("Do you want to Delete|Edit|CopyPassword|Return\n")
+                    option <- getLine
+
+                    case option of
+                        "Delete" -> do
+                            handleLoop (filter (/= specificPassInfo) masterList)
+                        "Edit" -> do
+                            let rmList = filter (/= specificPassInfo) masterList
+                            newInfo <- (handleEdit rmList specificPassInfo)
+                            let newList = newInfo : rmList
+                            optionLoop newInfo newList
+                        "CopyPassword" -> do
+                            setClipboard $ password specificPassInfo
+                            putStr "Password has been copied to clipboard.\n"
+                            putStr "Press enter to continue.\n"
+                            hSetBuffering stdin NoBuffering
+                            hSetEcho stdin False
+                            x <- getChar
+                            hSetBuffering stdin LineBuffering
+                            hSetEcho stdin True
+                            putStr "Password cleared from clipboard.\n"
+                            setClipboard ""
+                            optionLoop specificPassInfo masterList
+                        "Return" -> do
+                            handleLoop masterList
+                        otherwise -> do
+                            putStr "Incorrect option. Please try again.\n\n"
+                            optionLoop specificPassInfo masterList
+
+searchUsernames :: [PassInfo] -> IO [PassInfo]
+searchUsernames ls = do
+    putStr("Do you want to search by 'Username', 'Email', or 'Phonenumber'?\n")
+    usernameType <- getLine
+    case usernameType of
+        "Username" -> do
+            putStr("Enter the username:\n")
+            input <- getLine
+            pure $ go isUsername input ls
+        "Email" -> do
+            putStr("Enter the email:\n")
+            input <- getLine
+            pure $ go isEmail input ls
+        "Phonenumber" -> do
+            putStr("Enter the phone number:\n")
+            input <- getLine
+            pure $ go isPhone input ls
+        otherwise -> do
+            putStr "Incorrect option. Please try again.\n"
+            searchUsernames ls
+    where
+        go :: (UsernameData -> Bool) -> String -> [PassInfo] -> [PassInfo]
+        go pred str ls = filter ((any (\x -> (pred x) && ((getUsernameDataStr x) == str))) . username) ls
+
+
+handleEdit :: [PassInfo] -> PassInfo -> IO PassInfo
+handleEdit ls (PassInfo username password website url) = do
+    putStr ("Do you want to change the Userkeys|Password|Website|Done\n")
     toChange <- getLine
     case toChange of
         "Userkeys" -> do
-            newusernames <- (getUsernamesFromUser [])
-            handleEdit (PassInfo newusernames password website url)
+            newusernames <- (editUsernamesFromUser username)
+            handleEdit ls (PassInfo newusernames password website url)
         "Password" -> do
-            putStr ("Enter a new password\n")
-            input <- getLine
-            handleEdit (PassInfo username input website url)
+            input <- addPasswordLoop ls
+            handleEdit ls (PassInfo username input website url)
         "Website" -> do
-            putStr ("Enter a new website\n")
-            input <- getLine
-            handleEdit (PassInfo username password input url)
-        "URL" -> do
-            putStr ("Enter a new URL\n")
-            input <- getLine
-            handleEdit (PassInfo username password website input)
+            (websiteName, urlName) <- websiteLoop ls
+            handleEdit ls (PassInfo username password websiteName urlName)
         "Done" -> return (PassInfo username password website url)
+        otherwise -> do
+            putStr "Incorrect option. Please try again.\n\n"
+            handleEdit ls (PassInfo username password website url)
 
 -- Gets a list of UsernameData from the user
 getUsernamesFromUser :: [UsernameData] -> IO [UsernameData]
-getUsernamesFromUser acc = do
-    putStr("Do you login with a 'Username', 'Email', 'Phonenumber'.\n")
-    putStr("This will repeat until 'Done' entered.\n")
+getUsernamesFromUser acc = if null outputOptions 
+    then pure acc
+    else do
+        putStr("Do you want to add a " ++ (go outputOptions) ++ ".\n")
+        putStr("Type 'Done' to stop.\n")
+        newUsernameType <- getLine
+        case newUsernameType of
+            "Done" -> return acc
+            "Username" -> 
+                if isAnyUser
+                    then do
+                        putStr "Incorrect option. Please try again.\n"
+                        getUsernamesFromUser acc
+                    else do
+                        putStr("Enter a username:\n")
+                        newUsername <- getLine
+                        getUsernamesFromUser ((Username newUsername) : acc)
+            "Email" -> 
+                if isAnyEmail
+                    then do
+                        putStr "Incorrect option. Please try again.\n"
+                        getUsernamesFromUser acc
+                    else do
+                        putStr("Enter an email:\n")
+                        newUsername <- getLine
+                        getUsernamesFromUser ((Email newUsername) : acc)
+            "Phonenumber" -> 
+                if isAnyPhone
+                    then do
+                        putStr "Incorrect option. Please try again.\n"
+                        getUsernamesFromUser acc
+                    else do
+                        putStr("Enter a phonenumber:\n")
+                        newUsername <- getLine
+                        getUsernamesFromUser ((PhoneNumber newUsername) : acc)
+            dfault -> do
+                putStr "Incorrect option. Please try again.\n"
+                getUsernamesFromUser acc
+    where
+        isAnyUser = any isUsername acc
+        isAnyPhone = any isPhone acc
+        isAnyEmail = any isEmail acc
+        ls1 = if not isAnyPhone then ["'Phonenumber'"] else []
+        ls2 = if not isAnyEmail then "'Email'" : ls1 else ls1
+        outputOptions = if not isAnyUser then "'Username'" : ls2 else ls2
+        go :: [String] -> String
+        go [x] = x
+        go [x,y] =  x ++ ", or " ++ y
+        go (x:xs) = x ++ ", " ++ (go xs)
+        go [] = ""
+
+-- Edit a list of UsernameData from the user
+editUsernamesFromUser :: [UsernameData] -> IO [UsernameData]
+editUsernamesFromUser acc = do
+    putStr("Do you want to edit a 'Username', 'Email', or 'Phonenumber'.\n")
+    putStr("Type 'Done' to stop.\n")
     newUsernameType <- getLine
     case newUsernameType of
         "Done" -> return acc
         "Username" -> do
+            let newList = filter (not . isUsername) acc
             putStr("Enter the username.\n")
             newUsername <- getLine
-            getUsernamesFromUser (acc ++ [(Username newUsername)])
+            editUsernamesFromUser ((Username newUsername) : newList)
         "Email" -> do
+            let newList = filter (not . isEmail) acc
             putStr("Enter the email.\n")
             newUsername <- getLine
-            getUsernamesFromUser (acc ++ [(Email newUsername)])
+            editUsernamesFromUser ((Email newUsername) : newList)
         "Phonenumber" -> do
+            let newList = filter (not . isPhone) acc
             putStr("Enter the phonenumber.\n")
             newUsername <- getLine
-            getUsernamesFromUser (acc ++ [(PhoneNumber newUsername)])
-        dfault -> getUsernamesFromUser acc
+            editUsernamesFromUser ((PhoneNumber newUsername) : newList)
+        dfault -> do
+            putStr "Incorrect option. Please try again.\n"
+            editUsernamesFromUser acc
 
 -- Decomposes tab seperated values into a list of lists of strings.
 stringToList xs = (map (filter (/= "")) (map (splitOn "\t") (lines xs)))
@@ -299,6 +573,10 @@ fetchFromPassword searchFor ((PassInfo usernames password website url):xs) =
         then (PassInfo usernames password website url) : (fetchFromPassword searchFor xs)
         else (fetchFromPassword searchFor xs)
 
+printOrderedList :: (Show a) => [a] -> IO ()
+printOrderedList ls = do
+    mapM_ putStr $ zipWith (++) (map (\x -> "Item " ++ (show x) ++ ":\n") [1..(length ls)]) $ map show ls
+
 -- Creates a PassInfo list from a list of lists of strings.
 createPassInfoList :: [[String]] -> [PassInfo]
 createPassInfoList [] = []
@@ -313,13 +591,41 @@ createPassInfoList (x:xs) =
                 "email" -> (Email y) : getUsernames (xs)
                 "phone" -> (PhoneNumber y) : getUsernames (xs)
 
--- Returns true is there is duplicate PassInfo in a list.
-duplicateInfo :: [PassInfo] -> Bool
-duplicateInfo [] = False
-duplicateInfo (x:xs) =
-    if (elem x xs)
+-- Returns true is there is duplicate PassInfo in a list, excluding the password.
+duplicateInfo :: [PassInfo] -> PassInfo -> Bool
+duplicateInfo [] _ = False
+duplicateInfo ((PassInfo {username = userLs, website = webLs, url = urlLs}):xs) pi@PassInfo{username = userI, website = webI, url = urlI} =
+    if (matchingElement userLs userI) && (webLs == webI) && (urlLs == urlI)
         then True
-        else duplicateInfo xs
+        else duplicateInfo xs pi
+
+-- Checks if two list have at least one matching element
+matchingElement :: (Eq a) => [a] -> [a] -> Bool
+matchingElement ls1 ls2 = any pred ls1
+    where
+        pred user = elem user ls2
+
+-- Returns the number of PassInfo's that have the same password
+numDuplicatePass :: [PassInfo] -> String -> Int
+numDuplicatePass ls pass = length $ filter (\x -> pass == (password x)) ls
+
+-- Given a url, if a duplicate url is found, returns Just of the website name. 
+-- Otherwise returns Nothing
+duplicateURL :: [PassInfo] -> String -> Maybe String
+duplicateURL ls urlName = let
+    mUrlLs = dropWhile (\x -> (url x) /= urlName) ls
+    in if null mUrlLs
+        then Nothing
+        else Just $ website $ head mUrlLs
+
+-- Given a website name, searches for duplicate website name.
+-- If duplicate is found returns may of the matching url. Otherwise return Nothing
+duplicateWeb :: [PassInfo] -> String -> Maybe String
+duplicateWeb ls websiteName = let
+    matchWeb = dropWhile (\x -> (website x) /= websiteName) ls
+    in if null matchWeb
+        then Nothing
+        else Just $ url $ head matchWeb
 
 dropDuplicateInfo :: [PassInfo] -> [PassInfo]
 dropDuplicateInfo [] = []
@@ -328,33 +634,69 @@ dropDuplicateInfo (x:xs) =
         then dropDuplicateInfo xs
         else x : dropDuplicateInfo xs
 
-
-
 -- Converts a string to an integer value.
 -- takes the string and 0 as an input.
-getPasswordStrength :: String -> String
+getPasswordStrength :: String -> PasswordStrength
 getPasswordStrength pass = 
-    if ((passwordToNumber pass 0) > 50)
-        then "strong"
-        else if ((passwordToNumber pass 0) > 25)
-            then "medium"
-            else if ((passwordToNumber pass 0) > 10)
-                then "weak"
-                else "very weak"
+    if (passwordNumber >= 40)
+        then Strong
+        else if (passwordNumber >= 25)
+            then Medium
+            else if (passwordNumber >= 10)
+                then Weak
+                else VeryWeak
     where
-        passwordToNumber :: String -> Int -> Int
-        passwordToNumber [] acc = acc
-        passwordToNumber (x:xs) acc = 
-            if (elem x "!@#$%^&*()_-~`+=<>?:{}|,./\\;\'[]\"")
-                then passwordToNumber xs (acc + 12)
-                else if (elem x "1234567890")
-                    then passwordToNumber xs (acc + 6)
-                    else passwordToNumber xs (acc + 3)
+        hasSpecialCharMult = if any (\x -> elem x "!@#$%^&*()_-~`+=<>?:{}|,./\\;\'[]\"") pass
+            then 2.0
+            else 1.0
+        hasNumberMult = if any (\x -> elem x "0123456789") pass
+            then 1.5
+            else 1.0
+        hasUpperAndLowerMult = if (map toLower pass) /= pass
+            then 2.0
+            else 1.0
+        passwordNumber :: Double
+        passwordNumber = hasSpecialCharMult * hasNumberMult * hasUpperAndLowerMult * (fromIntegral (length pass))
 
 -- Exports a list of PassInfo to a file.
 -- takes a file path and list of PassInfo.
 exportPasswordInfo :: String -> [PassInfo] -> IO()
 exportPasswordInfo path xs = writeFile path (listToString xs "")
+
+-- Exports a list of PassInfo to an encrypted file.
+-- takes a list of PassInfo.
+exportEncPasswordInfo :: FilePath -> FilePath -> [PassInfo] -> IO ()
+exportEncPasswordInfo pathBin pathData xs = do
+    writeFile "tempExport.txt" (listToString xs "")
+    binData <- readBin "resources\\data.bin"
+    key <- passwordLoop binData
+    encryptFile "tempExport.txt" pathData key
+    writeBin pathBin (binSalt binData) (binPassHash binData)
+    removeFile "tempExport.txt"
+
+importEncPasswordInfo :: FilePath -> FilePath -> IO Bool
+importEncPasswordInfo pathBin pathData = do
+    dfeBin <- doesFileExist pathBin
+    dfeData <- doesFileExist pathData
+    if not dfeBin
+        then do
+            putStr "Cannot find .bin file.\n"
+            pure False
+        else if not dfeData
+            then do
+                putStr "Cannot find .dat file.\n"
+                pure False
+            else do
+                fileSize <- getFileSize pathBin
+                if fileSize /= 48
+                    then do
+                        putStr "Bin file has incorrect format. Check that file used is correct.\n"
+                        pure False
+                    else do
+                        binData <- readBin pathBin
+                        key <- passwordLoop binData
+                        decryptFile pathData "tempImport.txt" key
+                        pure True
 
 -- Converts a list of PassInfo to an exportable string.
 -- takes a list of PassInfo and an empty list as input.
@@ -362,3 +704,19 @@ listToString :: [PassInfo] -> String -> String
 listToString [] acc = acc
 listToString (x:xs) acc = 
     acc ++ (passInfoToString x) ++ "\n" ++ (listToString xs acc)
+
+
+-- Returns true if given UsernameData is an instance of Username
+isUsername :: UsernameData -> Bool
+isUsername (Username _) = True
+isUsername _ = False
+
+-- Returns true if given UsernameData is an instance of Email
+isEmail :: UsernameData -> Bool
+isEmail (Email _) = True
+isEmail _ = False
+
+-- Returns true if given UsernameData is an instance of PhoneNumber
+isPhone :: UsernameData -> Bool
+isPhone (PhoneNumber _) = True
+isPhone _ = False

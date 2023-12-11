@@ -193,17 +193,17 @@ generateSalt = do
     pure $ fst $ genByteString 16 pureGen
 
 -- Write binary bin file containing salt and password hash
-writeBin :: BNL.ByteString -> BNL.ByteString -> IO ()
-writeBin salt passHash = do
-    hOut <- openFile "resources\\data.bin" WriteMode
+writeBin :: FilePath -> BNL.ByteString -> BNL.ByteString -> IO ()
+writeBin path salt passHash = do
+    hOut <- openFile path WriteMode
     BNL.hPut hOut salt
     BNL.hPut hOut passHash
     hClose hOut
 
 -- Read salt and password hash from data.bin file
-readBin :: IO BinData
-readBin = do
-    hIn <- openFile "resources\\data.bin" ReadMode
+readBin :: FilePath -> IO BinData
+readBin path = do
+    hIn <- openFile path ReadMode
     salt <- BNL.hGet hIn 16
     passHash <- BNL.hGet hIn 32
     hClose hIn
